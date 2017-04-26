@@ -1,0 +1,85 @@
+# 处理数据元信息
+meta = """
+age: continuous. 
+workclass: Private, Self-emp-not-inc, Self-emp-inc, Federal-gov, Local-gov, State-gov, Without-pay, Never-worked. 
+fnlwgt: continuous. 
+education: Bachelors, Some-college, 11th, HS-grad, Prof-school, Assoc-acdm, Assoc-voc, 9th, 7th-8th, 12th, Masters, 1st-4th, 10th, Doctorate, 5th-6th, Preschool. 
+education-num: continuous. 
+marital-status: Married-civ-spouse, Divorced, Never-married, Separated, Widowed, Married-spouse-absent, Married-AF-spouse. 
+occupation: Tech-support, Craft-repair, Other-service, Sales, Exec-managerial, Prof-specialty, Handlers-cleaners, Machine-op-inspct, Adm-clerical, Farming-fishing, Transport-moving, Priv-house-serv, Protective-serv, Armed-Forces. 
+relationship: Wife, Own-child, Husband, Not-in-family, Other-relative, Unmarried. 
+race: White, Asian-Pac-Islander, Amer-Indian-Eskimo, Other, Black. 
+sex: Female, Male. 
+capital-gain: continuous. 
+capital-loss: continuous. 
+hours-per-week: continuous. 
+native-country: United-States, Cambodia, England, Puerto-Rico, Canada, Germany, Outlying-US(Guam-USVI-etc), India, Japan, Greece, South, China, Cuba, Iran, Honduras, Philippines, Italy, Poland, Jamaica, Vietnam, Mexico, Portugal, Ireland, France, Dominican-Republic, Laos, Ecuador, Taiwan, Haiti, Columbia, Hungary, Guatemala, Nicaragua, Scotland, Thailand, Yugoslavia, El-Salvador, Trinadad&Tobago, Peru, Hong, Holand-Netherlands.
+salary: <=50K, >50K
+"""
+#?? 有没有更标准的方法可以把标签数据转化为数字？
+names = []
+catMap = {}
+for line in meta.split("\n"):
+    line = line.strip()
+    if len(line) == 0:
+        continue
+    name, cate = tuple(line.split(":"))
+    names.append(name)
+    if 'continuous' in cate: # 数字类型的跳过
+        continue
+    catMap[name] = {v.strip(): i for i, v in enumerate(cate.rstrip(".").split(","))}
+
+import numpy as np
+import pandas as pd
+
+# pandas 读取 csv 格式到 DataFrame
+datas = pd.read_csv(r'C:\Users\Administrator\Desktop\adult.data', header=None, names=names)
+print(datas.shape)    # (32561, 15)
+
+# 遗漏数据在文件中是 ?，替换成 NaN
+datas = datas.replace(r'\?', np.nan, regex=True)
+
+# 剔除任何含有 NaN 的数据
+datas = datas.dropna(how="any")
+print(datas.shape)    # (30162, 15)
+
+# 将 Object 类型转化成 category 并赋予整数值
+for c in datas.columns:
+    if datas[c].dtype == 'object':
+        datas[c] = datas[c].apply(lambda x: catMap[c][x.strip()])
+datas = datas.dropna(how="any")
+
+# 分别将前 14 个属性和目标属性 salary 读入
+X, y = datas[datas.columns[:-1]], datas.salary
+X_arr = np.array(X)
+y_arr = np.array(y)
+
+# 10折交叉检验
+from sklearn.cross_validation import KFold
+kf = KFold(n=datas.shape[0], n_folds=10)
+for train_index, test_index in kf:
+    X_train, X_test = X_arr[train_index], X_arr[test_index]
+    y_train, y_test = y_arr[train_index], y_arr[test_index]
+    print("---- Shapes: ", X_train.shape, X_test.shape)
+# ---- Shapes:  (27146, 14) (3016, 14)  X 10次
+
+# 先取最后一折的数据进行测试：
+from sklearn.linear_model import LogisticRegression
+from sklearn.preprocessing import StandardScaler
+
+lr = LogisticRegression(penalty='l1', tol=0.01)
+lr.fit(X_train, y_train)
+lr.score(X_test, y_test)    # 0.83
+
+# 或者直接用 cross_val_score
+from sklearn.cross_validation import cross_val_score
+scores = cross_val_score(lr, X_arr, y_arr, cv=10)
+print("Mean: ", np.mean(scores)) # 0.81
+
+# 留一法
+from sklearn.cross_validation import LeaveOneOut
+## LOO 实际上等于 KFold(n, n_folds=n)
+# scores = cross_val_score(lr, X_arr, y_arr, cv=X_arr.shape[0])
+# -- 执行时间非常之长，在 Jupyter 里面运行应该已经超时了，最后没有返回结果
+scores = cross_val_score(lr, X_arr, y_arr, cv=1000) # 意思一下…
+print("Mean: ", np.mean(scores))  # 0.82
